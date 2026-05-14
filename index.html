@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bill Splitter</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">💸</div>
+      <div class="logo-text">Bill<span>Split</span></div>
+    </div>
+    <button class="sidebar-btn active" id="nav-new" onclick="showTab('new')">⚡ New Bill</button>
+    <button class="sidebar-btn" id="nav-history" onclick="showTab('history')">🕐 Bill History</button>
+    <button class="sidebar-btn" id="nav-friends" onclick="showTab('friends')">👥 Friends</button>
+    <div class="sidebar-section">Recent Bills</div>
+    <div class="bills-list" id="sidebar-bills"></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- NEW BILL TAB -->
+    <div id="tab-new">
+      <div style="display:flex;align-items:center;margin-bottom:4px">
+        <p class="page-title">New Bill</p>
+        <span id="saved-badge" class="saved-badge" style="display:none">✓ Saved</span>
+      </div>
+      <p class="page-sub">// add friends → assign items → split</p>
+
+      <div class="card" style="padding:14px 1.5rem">
+        <div class="section-title">Bill Title</div>
+        <input class="bill-title-input" type="text" id="bill-title" placeholder="e.g. Dinner at Spice Garden" />
+      </div>
+
+      <div class="card">
+        <div class="section-title">Friends</div>
+        <div class="friends-list" id="friends-list"></div>
+        <div class="add-row">
+          <input type="text" id="friend-input" placeholder="Friend's name" />
+          <button id="add-friend-btn">+ Add</button>
+        </div>
+      </div>
+
+      <div class="section-title" style="margin-bottom:10px;margin-top:0.5rem">Items</div>
+      <div id="items-container"></div>
+      <button class="btn-add-item" id="add-item-btn">+ Add item</button>
+
+      <div id="payer-section" style="display:none;margin-top:1rem">
+        <div class="card">
+          <div class="section-title">Who paid the bill?</div>
+          <p style="font-size:13px;color:var(--text3);font-family:var(--font-mono);font-weight:300">Select the person who paid upfront</p>
+          <div class="payer-wrap" id="payer-wrap"></div>
+        </div>
+      </div>
+
+      <p class="err" id="calc-err">⚠ Please fill all fields: at least 2 friends, 1 item with name + amount, assign each item to someone, and select who paid.</p>
+
+      <div style="display:flex;gap:10px;margin-top:1.25rem">
+        <button class="btn-primary" id="calc-btn" style="flex:1">Calculate & Save →</button>
+        <button class="btn-reset" onclick="resetForm()">↺ Reset</button>
+      </div>
+
+      <div id="results" style="display:none">
+        <div class="divider"></div>
+        <div class="section-title" style="margin-bottom:14px">Breakdown per person</div>
+        <div id="breakdown"></div>
+        <div class="section-title" style="margin:2rem 0 12px">Settlement</div>
+        <div id="settlement"></div>
+      </div>
+    </div>
+
+    <!-- HISTORY TAB -->
+    <div id="tab-history" style="display:none">
+      <p class="page-title">Bill History</p>
+      <p class="page-sub">// all saved bills from mongodb</p>
+      <div id="history-list"><div class="loading">Loading bills...</div></div>
+    </div>
+
+    <!-- FRIENDS TAB -->
+    <div id="tab-friends" style="display:none">
+      <p class="page-title">Friends</p>
+      <p class="page-sub">// manage your friends list</p>
+      <div class="card">
+        <div class="add-row" style="margin-bottom:1.25rem">
+          <input type="text" id="global-friend-input" placeholder="Add a new friend" style="flex:1;max-width:none" />
+          <button id="global-add-friend-btn">+ Add</button>
+        </div>
+        <div id="global-friends-list"><div class="loading">Loading...</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="name">Made by AJAY KRISHNAN R</div>
+
+<script>
+const API = '';
+const BG = ['#2d1b69','#0d3b2e','#3b1a1a','#2d1a3b','#0d2b1a','#3b2800','#3b0d1a','#1a1a3b'];
+const FG = ['#a78bfa','#34d399','#f87171','#c084fc','#4ade80','#fbbf24','#fb7185','#818cf8'];
+
+let friends = [], items = [], payer = null, nextId = 0;
+
+function ini(n) { return n.trim().split(/\s+/).map(w=>w[0]).join('').toUpperCase().slice(0,2); }
+function bg(i) { return BG[i%BG.length]; }
+function fg(i) { return FG[i%FG.length]; }
+
+function showToast(msg, duration=2800) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), duration);
+}
+
+function showTab(tab) {
+  ['new','history','friends'].forEach(t=>{
+    document.getElementById('tab-'+t).style.display = t===tab ? '' : 'none';
+    document.getElementById('nav-'+t).classList.toggle('active', t===tab);
+  });
+  if (tab==='history') loadHistory();
+  if (tab==='friends') loadGlobalFriends();
+}
+
+function renderFriends() {
+  const el = document.getElementById('friends-list');
+  el.innerHTML = '';
+  friends.forEach((f, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'friend-chip';
+    chip.innerHTML = `<div class="avatar" style="width:28px;height:28px;font-size:10px;background:${bg(i)};color:${fg(i)}">${ini(f)}</div><span>${f}</span>`;
+    const btn = document.createElement('button');
+    btn.className = 'chip-remove'; btn.textContent = '×';
+    btn.onclick = () => {
+      friends = friends.filter(x=>x!==f);
+      items.forEach(it=>{ it.assignees = it.assignees.filter(a=>a!==f); });
+      if (payer===f) payer = null;
+      renderFriends(); rebuildAssignButtons(); renderPayer();
+      document.getElementById('payer-section').style.display = friends.length>=2 ? '' : 'none';
+    };
+    chip.appendChild(btn);
+    el.appendChild(chip);
+  });
+}
+
+document.getElementById('add-friend-btn').addEventListener('click', () => {
+  const inp = document.getElementById('friend-input');
+  const name = inp.value.trim();
+  if (!name || friends.includes(name)) return;
+  friends.push(name); inp.value = '';
+  renderFriends(); rebuildAssignButtons(); renderPayer();
+  document.getElementById('payer-section').style.display = friends.length>=2 ? '' : 'none';
+});
+document.getElementById('friend-input').addEventListener('keydown', e=>{
+  if (e.key==='Enter') document.getElementById('add-friend-btn').click();
+});
+
+function renderPayer() {
+  const el = document.getElementById('payer-wrap');
+  el.innerHTML = '';
+  friends.forEach((f, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'payer-btn' + (payer===f ? ' on' : '');
+    btn.innerHTML = `<div class="avatar" style="width:24px;height:24px;font-size:10px;background:${bg(i)};color:${fg(i)}">${ini(f)}</div>${f}`;
+    btn.addEventListener('click', ()=>{
+      payer = f;
+      document.querySelectorAll('.payer-btn').forEach(b=>b.classList.remove('on'));
+      btn.classList.add('on');
+    });
+    el.appendChild(btn);
+  });
+}
+
+function createItemCard(item) {
+  const card = document.createElement('div');
+  card.className = 'item-card'; card.dataset.id = item.id;
+
+  const header = document.createElement('div'); header.className = 'item-header';
+
+  const ng = document.createElement('div'); ng.className='field-group'; ng.style.flex='2';
+  const nl = document.createElement('span'); nl.className='field-label'; nl.textContent='Item name';
+  const ni = document.createElement('input'); ni.type='text'; ni.placeholder='e.g. Pizza'; ni.value=item.name;
+  ni.addEventListener('input', ()=>{ item.name=ni.value; });
+  ng.append(nl, ni);
+
+  const ag = document.createElement('div'); ag.className='field-group'; ag.style.flex='1';
+  const al = document.createElement('span'); al.className='field-label'; al.textContent='Amount (₹)';
+  const ai = document.createElement('input'); ai.type='number'; ai.placeholder='0'; ai.min='0'; ai.value=item.amount;
+  ai.addEventListener('input', ()=>{ item.amount=ai.value; });
+  ag.append(al, ai);
+
+  const del = document.createElement('button');
+  del.textContent='✕'; del.title='Remove item';
+  del.style.cssText='background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px;padding:4px;align-self:flex-end;transition:color 0.15s;';
+  del.onmouseenter=()=>del.style.color='var(--red)';
+  del.onmouseleave=()=>del.style.color='var(--text3)';
+  del.addEventListener('click', ()=>{ items=items.filter(it=>it.id!==item.id); card.remove(); });
+
+  header.append(ng, ag, del);
+  card.appendChild(header);
+
+  const fl = document.createElement('div'); fl.className='field-label'; fl.style.marginBottom='8px';
+  fl.textContent='Who ordered this? (select multiple)';
+  card.appendChild(fl);
+
+  const grid = document.createElement('div'); grid.className='assign-grid'; grid.dataset.itemId=item.id;
+  card.appendChild(grid);
+  buildAssignButtons(grid, item);
+  return card;
+}
+
+function buildAssignButtons(grid, item) {
+  grid.innerHTML = '';
+  if (!friends.length) {
+    grid.innerHTML='<p style="font-size:12px;color:var(--text3);font-family:var(--font-mono)">Add friends first</p>';
+    return;
+  }
+  friends.forEach((f, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'assign-btn' + (item.assignees.includes(f) ? ' on' : '');
+    btn.innerHTML = `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:${bg(i)};color:${fg(i)}">${ini(f)}</div>${f}`;
+    btn.addEventListener('click', ()=>{
+      if (item.assignees.includes(f)) {
+        item.assignees = item.assignees.filter(a=>a!==f);
+        btn.classList.remove('on');
+      } else {
+        item.assignees.push(f);
+        btn.classList.add('on');
+      }
+    });
+    grid.appendChild(btn);
+  });
+}
+
+function rebuildAssignButtons() {
+  items.forEach(item=>{
+    const grid = document.querySelector(`.assign-grid[data-item-id="${item.id}"]`);
+    if (grid) buildAssignButtons(grid, item);
+  });
+}
+
+document.getElementById('add-item-btn').addEventListener('click', ()=>{
+  const item = { id:nextId++, name:'', amount:'', assignees:[] };
+  items.push(item);
+  document.getElementById('items-container').appendChild(createItemCard(item));
+});
+
+document.getElementById('calc-btn').addEventListener('click', async ()=>{
+  const errEl = document.getElementById('calc-err');
+  const valid = friends.length>=2 && items.length>0 && payer!==null
+    && items.every(it=>it.name.trim() && parseFloat(it.amount)>0 && it.assignees.length>0);
+  if (!valid) { errEl.style.display='block'; return; }
+  errEl.style.display='none';
+
+  const btn = document.getElementById('calc-btn');
+  btn.disabled=true; btn.textContent='Saving...';
+  try {
+    const payload = {
+      title: document.getElementById('bill-title').value.trim() || 'Bill',
+      friends, payer,
+      items: items.map(it=>({ name:it.name.trim(), amount:parseFloat(it.amount), assignees:it.assignees })),
+    };
+    const res = await fetch(`${API}/api/bills`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message);
+    renderResults(data.data);
+    document.getElementById('results').style.display='';
+    document.getElementById('saved-badge').style.display='';
+    document.getElementById('results').scrollIntoView({behavior:'smooth',block:'start'});
+    showToast('✅ Bill saved to database!');
+    loadSidebarBills();
+  } catch(err) {
+    showToast('❌ '+err.message);
+  } finally {
+    btn.disabled=false; btn.textContent='Calculate & Save →';
+  }
+});
+
+function renderResults(bill) {
+  const totals={}, logs={};
+  bill.friends.forEach(f=>{ totals[f]=0; logs[f]=[]; });
+  bill.items.forEach(it=>{
+    const share=it.amount/it.assignees.length;
+    it.assignees.forEach(f=>{ totals[f]+=share; logs[f].push({name:it.name,share}); });
+  });
+
+  document.getElementById('breakdown').innerHTML = bill.friends.map((f,i)=>`
+    <div class="result-card">
+      <div class="result-header">
+        <div class="avatar" style="width:42px;height:42px;font-size:14px;background:${bg(i)};color:${fg(i)}">${ini(f)}</div>
+        <div class="result-name">${f}</div>
+        <div class="result-total" style="color:${fg(i)}">₹${totals[f].toFixed(2)}</div>
+      </div>
+      <div class="result-items">
+        ${logs[f].map(it=>`<div class="result-row"><span>${it.name}</span><span>₹${it.share.toFixed(2)}</span></div>`).join('')}
+      </div>
+    </div>`).join('');
+
+  document.getElementById('settlement').innerHTML = bill.settlements.length
+    ? bill.settlements.map(s=>{
+        const i=bill.friends.indexOf(s.from);
+        return `<div class="settle-card">
+          <div class="avatar" style="width:32px;height:32px;font-size:11px;background:${bg(i)};color:${fg(i)}">${ini(s.from)}</div>
+          <span style="color:var(--text2)"><strong style="color:var(--text)">${s.from}</strong> owes <strong style="color:var(--text)">${s.to}</strong></span>
+          <span class="settle-amt">₹${s.amount.toFixed(2)}</span>
+        </div>`;
+      }).join('')
+    : '<p style="font-size:13px;color:var(--text3);font-family:var(--font-mono)">No settlements needed.</p>';
+}
+
+function resetForm() {
+  friends=[]; items=[]; payer=null; nextId=0;
+  document.getElementById('friends-list').innerHTML='';
+  document.getElementById('items-container').innerHTML='';
+  document.getElementById('payer-wrap').innerHTML='';
+  document.getElementById('bill-title').value='';
+  document.getElementById('payer-section').style.display='none';
+  document.getElementById('results').style.display='none';
+  document.getElementById('saved-badge').style.display='none';
+  document.getElementById('calc-err').style.display='none';
+}
+
+async function loadHistory() {
+  const el = document.getElementById('history-list');
+  el.innerHTML='<div class="loading">Loading bills...</div>';
+  try {
+    const res = await fetch(`${API}/api/bills`);
+    const data = await res.json();
+    if (!data.success || !data.data.length) {
+      el.innerHTML='<div class="empty">No bills saved yet.<br>Create your first bill!</div>'; return;
+    }
+    el.innerHTML = data.data.map(bill=>{
+      const date=new Date(bill.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+      return `<div class="history-card" onclick="viewBill('${bill._id}')">
+        <div class="history-header">
+          <div>
+            <div class="history-title">${bill.title}</div>
+            <div class="history-meta">${date} · paid by ${bill.payer}</div>
+          </div>
+          <div class="history-total">₹${bill.totalAmount.toFixed(2)}</div>
+        </div>
+        <div>${bill.friends.map((f,i)=>`<span class="history-badge"><span class="avatar" style="width:14px;height:14px;font-size:7px;background:${bg(i)};color:${fg(i)}">${ini(f)}</span>${f}</span>`).join('')}</div>
+      </div>`;
+    }).join('');
+  } catch(err) {
+    el.innerHTML='<div class="empty">Could not load bills.<br>Is the server running?</div>';
+  }
+}
+
+async function viewBill(id) {
+  try {
+    const res = await fetch(`${API}/api/bills/${id}`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message);
+    const bill=data.data;
+    friends=bill.friends; payer=bill.payer;
+    items=bill.items.map((it,i)=>({...it,id:i})); nextId=items.length;
+    document.getElementById('bill-title').value=bill.title;
+    renderFriends();
+    document.getElementById('items-container').innerHTML='';
+    items.forEach(item=>document.getElementById('items-container').appendChild(createItemCard(item)));
+    renderPayer();
+    document.getElementById('payer-section').style.display='';
+    renderResults(bill);
+    document.getElementById('results').style.display='';
+    document.getElementById('saved-badge').style.display='';
+    showTab('new');
+    window.scrollTo({top:0,behavior:'smooth'});
+  } catch(err) { showToast('❌ '+err.message); }
+}
+
+async function loadSidebarBills() {
+  const el = document.getElementById('sidebar-bills');
+  try {
+    const res = await fetch(`${API}/api/bills`);
+    const data = await res.json();
+    if (!data.success) return;
+    el.innerHTML = data.data.slice(0,8).map(bill=>{
+      const date=new Date(bill.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+      return `<div class="bill-item" onclick="viewBill('${bill._id}')">
+        <div class="bill-item-name">${bill.title}</div>
+        <div class="bill-item-date">${date}</div>
+        <button class="bill-del" onclick="event.stopPropagation();deleteBill('${bill._id}')" title="Delete">×</button>
+      </div>`;
+    }).join('');
+  } catch(_) {}
+}
+
+async function deleteBill(id) {
+  if (!confirm('Delete this bill?')) return;
+  try {
+    const res = await fetch(`${API}/api/bills/${id}`,{method:'DELETE'});
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message);
+    showToast('🗑 Bill deleted');
+    loadSidebarBills(); loadHistory();
+  } catch(err) { showToast('❌ '+err.message); }
+}
+
+async function loadGlobalFriends() {
+  const el = document.getElementById('global-friends-list');
+  el.innerHTML='<div class="loading">Loading...</div>';
+  try {
+    const res = await fetch(`${API}/api/friends`);
+    const data = await res.json();
+    if (!data.success || !data.data.length) {
+      el.innerHTML='<div class="empty">No friends yet.<br>Add some!</div>'; return;
+    }
+    el.innerHTML = data.data.map((f,i)=>`
+      <div class="global-friend-row">
+        <div class="avatar" style="width:36px;height:36px;font-size:12px;background:${bg(i)};color:${fg(i)}">${ini(f.name)}</div>
+        <span class="global-friend-name">${f.name}</span>
+        <button class="global-friend-del" onclick="deleteFriend('${f._id}')" title="Remove">×</button>
+      </div>`).join('');
+  } catch(err) {
+    el.innerHTML='<div class="empty">Could not load.<br>Is the server running?</div>';
+  }
+}
+
+document.getElementById('global-add-friend-btn').addEventListener('click', async ()=>{
+  const inp = document.getElementById('global-friend-input');
+  const name = inp.value.trim();
+  if (!name) return;
+  try {
+    const res = await fetch(`${API}/api/friends`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name}),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message);
+    inp.value='';
+    showToast('✅ Friend added!');
+    loadGlobalFriends();
+  } catch(err) { showToast('❌ '+err.message); }
+});
+document.getElementById('global-friend-input').addEventListener('keydown', e=>{
+  if (e.key==='Enter') document.getElementById('global-add-friend-btn').click();
+});
+
+async function deleteFriend(id) {
+  try {
+    const res = await fetch(`${API}/api/friends/${id}`,{method:'DELETE'});
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message);
+    showToast('🗑 Friend removed');
+    loadGlobalFriends();
+  } catch(err) { showToast('❌ '+err.message); }
+}
+
+loadSidebarBills();
+
+</script>
+</body>
+</html>
